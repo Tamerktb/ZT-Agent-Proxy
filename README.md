@@ -5,6 +5,8 @@
 
 A working reference implementation of Zero Trust security for AI agents. Every agent action is authenticated, authorized, rate-limited, inspected for attacks, and immutably logged — no exceptions.
 
+For a step-by-step walkthrough of the code and concepts, read **[TUTORIAL.md](TUTORIAL.md)**.
+
 ![Architecture Diagram](images/architecture.svg)
 
 ---
