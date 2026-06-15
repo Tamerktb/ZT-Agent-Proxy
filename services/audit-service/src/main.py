@@ -2,13 +2,12 @@
 Audit Service — maintains an immutable hash-chain log of all agent actions.
 Each entry contains a SHA256 hash of the previous entry (blockchain-style).
 Provides chain verification endpoint to detect any tampering with logs.
-
-Uses SQLite for persistence — data survives restarts. Compatible with standard SQL tools.
 """
 import sqlite3
 import hashlib
 import logging
 import os
+import sys
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -17,20 +16,18 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-logging.basicConfig(level=logging.INFO)
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+from shared.production import setup_logging, register_shutdown, security_headers_middleware, add_metrics
+
+setup_logging()
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Audit Service", version="1.0.0")
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+app.middleware("http")(security_headers_middleware)
+add_metrics(app, "audit")
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-DATA_DIR = Path(os.environ.get("AUDIT_DATA_DIR", "/app/data"))
+DATA_DIR = Path(os.environ.get("AUDIT_DATA_DIR", os.path.join(os.path.dirname(__file__), "data")))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH = str(DATA_DIR / "audit.db")
 
@@ -195,3 +192,4 @@ async def root():
 
 
 init_db()
+register_shutdown()

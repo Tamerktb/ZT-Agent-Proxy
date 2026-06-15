@@ -1,14 +1,12 @@
 """
 Credential Vault — issues dynamic per-action credentials with short TTLs.
 Implements just-in-time access: credentials are checked out, used once, and auto-expire.
-No static secrets are stored; each lease generates a unique credential hash.
-
-Uses SQLite for persistence — leases survive restarts until they expire.
 """
 import uuid
 import hashlib
 import time
 import os
+import sys
 import logging
 import sqlite3
 from datetime import datetime, timezone
@@ -18,20 +16,18 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-logging.basicConfig(level=logging.INFO)
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+from shared.production import setup_logging, register_shutdown, security_headers_middleware, add_metrics
+
+setup_logging()
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Credential Vault", version="1.0.0")
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+app.middleware("http")(security_headers_middleware)
+add_metrics(app, "vault")
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-DATA_DIR = Path(os.environ.get("VAULT_DATA_DIR", "/app/data"))
+DATA_DIR = Path(os.environ.get("VAULT_DATA_DIR", os.path.join(os.path.dirname(__file__), "data")))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH = str(DATA_DIR / "vault.db")
 
@@ -191,3 +187,4 @@ async def root():
 
 
 init_db()
+register_shutdown()

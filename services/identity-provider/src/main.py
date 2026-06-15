@@ -1,11 +1,9 @@
 """
 Identity Provider — manages Non-Human Identities (NHIs) for AI agents.
 Handles agent registration, JWT issuance, and token verification.
-Each agent gets a unique identity with a role and scoped policies.
-
-Uses SQLite for persistence — agents and tokens survive restarts.
 """
 import os
+import sys
 import uuid
 import logging
 import sqlite3
@@ -17,27 +15,27 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-logging.basicConfig(level=logging.INFO)
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+from shared.production import setup_logging, register_shutdown, security_headers_middleware, add_metrics
+
+setup_logging()
 logger = logging.getLogger(__name__)
 
 JWT_SECRET = os.environ.get("JWT_SECRET")
 if not JWT_SECRET:
     raise RuntimeError("JWT_SECRET environment variable is required")
+if JWT_SECRET == "zt-lab-secret-change-in-prod":
+    logger.warning("Using default JWT_SECRET — set a strong secret in production")
 
 JWT_ALGORITHM = "HS256"
 JWT_TTL_MINUTES = int(os.environ.get("JWT_TTL_MINUTES", "60"))
 
 app = FastAPI(title="Identity Provider", version="1.0.0")
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+app.middleware("http")(security_headers_middleware)
+add_metrics(app, "idp")
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-DATA_DIR = Path(os.environ.get("IDP_DATA_DIR", "/app/data"))
+DATA_DIR = Path(os.environ.get("IDP_DATA_DIR", os.path.join(os.path.dirname(__file__), "data")))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH = str(DATA_DIR / "identity.db")
 
@@ -89,10 +87,8 @@ async def register_agent(req: RegisterRequest):
             raise HTTPException(status_code=409, detail="agent already registered")
         now = datetime.now(timezone.utc).isoformat()
         policies_str = ",".join(req.policies)
-        db.execute(
-            "INSERT INTO agents (agent_id, role, policies, created_at, active) VALUES (?, ?, ?, ?, 1)",
-            (req.agent_id, req.role, policies_str, now),
-        )
+        db.execute("INSERT INTO agents (agent_id, role, policies, created_at, active) VALUES (?, ?, ?, ?, 1)",
+                   (req.agent_id, req.role, policies_str, now))
         db.commit()
         logger.info(f"Registered NHI: {req.agent_id} (role: {req.role})")
         return {"agent_id": req.agent_id, "role": req.role, "policies": req.policies, "created_at": now, "active": True}
@@ -104,23 +100,17 @@ async def issue_token(req: RegisterRequest):
         agent = db.execute("SELECT * FROM agents WHERE agent_id = ? AND active = 1", (req.agent_id,)).fetchone()
     if not agent:
         raise HTTPException(status_code=401, detail="agent not registered or inactive")
-
     now = datetime.now(timezone.utc)
     payload = {
-        "sub": req.agent_id,
-        "role": agent["role"],
+        "sub": req.agent_id, "role": agent["role"],
         "policies": agent["policies"].split(",") if agent["policies"] else [],
-        "iat": now,
-        "exp": now + timedelta(minutes=JWT_TTL_MINUTES),
-        "jti": str(uuid.uuid4()),
+        "iat": now, "exp": now + timedelta(minutes=JWT_TTL_MINUTES), "jti": str(uuid.uuid4()),
     }
     token = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
-
     with closing(get_db()) as db:
         db.execute("INSERT INTO token_log (agent_id, jti, issued_at) VALUES (?, ?, ?)",
                    (req.agent_id, payload["jti"], now.isoformat()))
         db.commit()
-
     logger.info(f"Issued token for {req.agent_id} (expires in {JWT_TTL_MINUTES}m)")
     return {"token": token, "expires_in": JWT_TTL_MINUTES * 60, "agent_id": req.agent_id}
 
@@ -134,17 +124,10 @@ async def verify_token(req: VerifyRequest):
         if not agent:
             raise HTTPException(status_code=401, detail="agent not active")
         logger.info(f"Token verified for {payload['sub']}")
-        return {
-            "allowed": True,
-            "agent_id": payload["sub"],
-            "role": payload.get("role"),
-            "policies": payload.get("policies", []),
-        }
+        return {"allowed": True, "agent_id": payload["sub"], "role": payload.get("role"), "policies": payload.get("policies", [])}
     except jwt.ExpiredSignatureError:
-        logger.warning("Token verification failed: expired")
         raise HTTPException(status_code=401, detail="token expired")
-    except jwt.InvalidTokenError as e:
-        logger.warning(f"Token verification failed: {e}")
+    except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="invalid token")
 
 
@@ -168,3 +151,4 @@ async def root():
 
 
 init_db()
+register_shutdown()
