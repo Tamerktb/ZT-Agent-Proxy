@@ -9,51 +9,6 @@ A working reference implementation of Zero Trust security for AI agents. Every a
 
 ---
 
-## For Different Audiences
-
-### 👩‍🎓 For Students
-Want to learn how Zero Trust applies to AI? Clone this repo:
-```bash
-git clone https://github.com/Tamerktb/ZT-Agentic-gateway.git
-cd ZT-Agentic-gateway
-pip install fastapi uvicorn httpx pydantic pydantic-settings PyJWT
-
-# Run all services and tests in one command:
-python test_integration.py
-```
-Each service has a docstring explaining what it does and why. Start with `services/ai-gateway/src/middleware/` to see the 5-stage pipeline.
-
-**What you'll learn:** JWT authentication, policy-as-code, rate limiting, prompt injection detection, blockchain-style audit logging, dynamic secrets, Docker Compose, Terraform, CI/CD.
-
-### 💼 For Employers
-This project demonstrates:
-- **System architecture** — 6 microservices communicating over HTTP with health checks and dependency ordering
-- **Security engineering** — Zero Trust applied to AI agents (prompt injection, exfiltration, privilege escalation, credential theft, runaway agents)
-- **Infrastructure-as-Code** — Terraform module for AWS deployment with VPC micro-segmentation
-- **CI/CD** — GitHub Actions pipeline runs all 24 integration tests on every push
-- **Clean code** — FastAPI, async Python, Pydantic schemas, OPA-style policies, hash-chain audit
-
-**Verified:** All 24 tests pass. Run `python test_integration.py` to confirm.
-
-### 🔧 For Professionals
-The architecture is modular and each service can be replaced or extended:
-- Swap the Python policy engine for real OPA/Rego runtime
-- Replace the in-memory audit store with PostgreSQL or S3
-- Add Redis for distributed rate limiting
-- Extend attack patterns in `prompt_inspection.py` for your own use case
-- Deploy to AWS with `terraform apply`
-
-**One honest note:** The policy engine parses `.rego` files with Python instead of running OPA. It uses the same policy structure but evaluates natively. Swap in `openpolicyagent/opa` for production.
-
-### 🔍 For Recruiters
-**Role fit:** SOC Analyst, Security Engineer, Cloud Security, AI Security, DevSecOps
-
-**Keywords:** Python, FastAPI, Zero Trust, JWT, OPA/Rego, Docker, Terraform, AWS, CI/CD, SIEM, Wazuh, Splunk, Threat Detection, Incident Response, Penetration Testing, ISO 27001
-
-**24/24 integration tests pass** — this isn't theory, it's working code.
-
----
-
 ## Quick Start
 
 ### Option 1: Web UI Dashboard (easiest — no Docker needed)
