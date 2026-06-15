@@ -3,7 +3,9 @@
 ![CI](https://github.com/Tamerktb/ZT-Agentic-gateway/actions/workflows/ci.yml/badge.svg)
 ![Tests](https://img.shields.io/badge/tests-24%2F24-passing-green)
 
-A working reference implementation of Zero Trust security for AI agents. Every agent action is authenticated, authorized, rate-limited, inspected for attacks, and immutably logged — no exceptions.
+A production-hardened Zero Trust security gateway for AI agents. Every agent action is authenticated, authorized, rate-limited, inspected for attacks, and immutably logged — no exceptions.
+
+**Production features:** SQLite persistence (survives restarts), Prometheus metrics per service (`/metrics`), structured JSON logging (`LOG_FORMAT=json`), security headers on every response, graceful shutdown on SIGTERM/SIGINT, CORS enabled, and required `JWT_SECRET` (fails at startup if unset).
 
 For a step-by-step walkthrough of the code and concepts, read **[TUTORIAL.md](TUTORIAL.md)**.
 
@@ -21,8 +23,12 @@ cp .env.example .env
 docker compose -f docker-compose.prod.yml up -d
 ```
 
-SQLite databases persist in Docker volumes — restart without losing data.
-Requires `JWT_SECRET` to be set (fails with clear error if missing).
+All services expose Prometheus metrics at `/metrics`. Enable JSON logging:
+```bash
+LOG_FORMAT=json docker compose -f docker-compose.prod.yml up -d
+```
+
+Requires `JWT_SECRET` to be set — services fail at startup with a clear error if missing.
 
 ### Option 1: Web UI Dashboard (easiest — no Docker needed)
 
@@ -80,10 +86,10 @@ curl http://localhost:8000/api/v1/admin/stats | python -m json.tool
 | Service | Port | Role |
 |---------|------|------|
 | `ai-gateway` | 8000 | Zero Trust enforcement — 5-stage middleware pipeline |
-| `identity-provider` | 8001 | NHI management — JWT issuance and verification |
-| `credential-vault` | 8002 | Dynamic per-action credentials with TTL expiry |
+| `identity-provider` | 8001 | NHI management — JWT issuance/verification (SQLite) |
+| `credential-vault` | 8002 | Dynamic per-action credentials with TTL expiry (SQLite) |
 | `policy-engine` | 8003 | Rego-style policy rules (parsed in Python) |
-| `audit-service` | 8004 | Immutable hash-chain audit log |
+| `audit-service` | 8004 | Immutable hash-chain audit log (SQLite) |
 | `demo-agents` | — | Shopping agent + sub-agent spawner |
 | `attack-simulator` | — | 6 Zero Trust control demonstrations |
 
@@ -105,16 +111,20 @@ If any stage fails, the action is blocked immediately and logged.
 
 ```
 ├── .github/workflows/ci.yml       # 24-test CI pipeline
+├── .env.example                    # Documented env vars template
 ├── docker-compose.yml             # Multi-service orchestration
+├── docker-compose.prod.yml        # Production config (volumes, required secrets)
 ├── Makefile                        # Build/run/demo commands
 ├── test_integration.py             # Full integration test suite
+├── shared/                         # Shared production utilities
+│   └── production.py              # Prometheus metrics, structured logging, security headers, graceful shutdown
 ├── services/
 │   ├── ai-gateway/                # Core Zero Trust enforcement
 │   │   └── src/middleware/        # 5-stage pipeline
-│   ├── identity-provider/         # NHI management (JWT)
-│   ├── credential-vault/          # Dynamic secrets broker
+│   ├── identity-provider/         # NHI management (JWT, SQLite)
+│   ├── credential-vault/          # Dynamic secrets broker (SQLite)
 │   ├── policy-engine/             # Rego-style policy rules
-│   ├── audit-service/             # Hash-chain audit log
+│   ├── audit-service/             # Hash-chain audit log (SQLite)
 │   ├── demo-agents/               # Example agent flows
 │   └── attack-simulator/          # Attack demonstrations
 ├── ui/                              # Web UI dashboard
