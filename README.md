@@ -13,6 +13,17 @@ For a step-by-step walkthrough of the code and concepts, read **[TUTORIAL.md](TU
 
 ## Quick Start
 
+### Production deployment
+
+```bash
+cp .env.example .env
+# Edit .env and set JWT_SECRET to a long random string
+docker compose -f docker-compose.prod.yml up -d
+```
+
+SQLite databases persist in Docker volumes — restart without losing data.
+Requires `JWT_SECRET` to be set (fails with clear error if missing).
+
 ### Option 1: Web UI Dashboard (easiest — no Docker needed)
 
 ```bash
