@@ -1,4 +1,4 @@
-.PHONY: build up down clean demo-attack demo-normal demo-all test lint
+.PHONY: build up down clean demo-attack demo-normal demo-all test lint install smol
 
 build:
 	docker compose build
@@ -25,6 +25,15 @@ demo-all: up
 	@echo ""
 	@echo "=== Running Attack Simulations ==="
 	python scripts/run_demo.py --scenario attacks
+
+install:
+	pip install -e .
+
+smol:
+	zt-gateway --mode smol --port 8000
+
+test-smol:
+	python test_smol.py
 
 test:
 	docker compose exec ai-gateway pytest /app/tests/ -v

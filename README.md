@@ -3,9 +3,11 @@
 ![CI](https://github.com/Tamerktb/ZT-Agentic-gateway/actions/workflows/ci.yml/badge.svg)
 ![Tests](https://img.shields.io/badge/tests-24%2F24-passing-green)
 
-A production-hardened Zero Trust security gateway for AI agents. Every agent action is authenticated, authorized, rate-limited, inspected for attacks, and immutably logged — no exceptions.
+> **Dual-mode Zero Trust security gateway for AI agents.**  
+> 🔹 **Personal mode:** `pip install zt-gateway && zt-gateway` — single process, no Docker.  
+> 🔸 **Enterprise mode:** Docker Compose with 6 microservices, Terraform, Wazuh SIEM, Prometheus.
 
-**Production features:** SQLite persistence (survives restarts), Prometheus metrics per service (`/metrics`), structured JSON logging (`LOG_FORMAT=json`), security headers on every response, graceful shutdown on SIGTERM/SIGINT, CORS enabled, and required `JWT_SECRET` (fails at startup if unset).
+Every agent action is authenticated, authorized, rate-limited, inspected for attacks, and immutably logged — no exceptions, in either mode.
 
 For a step-by-step walkthrough of the code and concepts, read **[TUTORIAL.md](TUTORIAL.md)**.
 
@@ -15,7 +17,31 @@ For a step-by-step walkthrough of the code and concepts, read **[TUTORIAL.md](TU
 
 ## Quick Start
 
-### Production deployment
+### ⚡ Option 0: Smol Mode (personal — 1 command, no Docker)
+
+```bash
+pip install zt-gateway
+zt-gateway
+# → Listening on http://127.0.0.1:8000
+```
+
+All 6 services collapsed into a single process. SQLite persists in `~/.zt-gateway/data/`.  
+Auto-generates a JWT secret (or set `ZT_JWT_SECRET`). Test it:
+
+```bash
+# Register an agent and run the full pipeline in one shot:
+python test_smol.py
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--port` | 8000 | Listen port |
+| `--host` | 127.0.0.1 | Listen address |
+| `--jwt-secret` | auto | JWT signing key |
+| `--data-dir` | auto | SQLite data directory |
+| `--log-level` | INFO | Log verbosity |
+
+### 🏢 Enterprise deployment
 
 ```bash
 cp .env.example .env
@@ -28,9 +54,7 @@ All services expose Prometheus metrics at `/metrics`. Enable JSON logging:
 LOG_FORMAT=json docker compose -f docker-compose.prod.yml up -d
 ```
 
-Requires `JWT_SECRET` to be set — services fail at startup with a clear error if missing.
-
-### Option 1: Web UI Dashboard (easiest — no Docker needed)
+### Option 1: Web UI Dashboard (no Docker)
 
 ```bash
 pip install fastapi uvicorn httpx pydantic pydantic-settings PyJWT prometheus-client
@@ -39,7 +63,7 @@ cd ZT-Agentic-gateway
 python ui/server.py
 ```
 
-Opens a browser at **http://127.0.0.1:8080** with a visual dashboard. Click "Run All Tests" to see the project working.
+Opens a browser at **http://127.0.0.1:8080** with a visual dashboard.
 
 ### Option 2: CLI (with Docker)
 
@@ -112,12 +136,19 @@ If any stage fails, the action is blocked immediately and logged.
 ## Project Structure
 
 ```
+├── pyproject.toml                  # Pip package (pip install zt-gateway)
+├── zt_gateway/                     # Smol mode — single-process CLI
+│   ├── __init__.py
+│   ├── __main__.py
+│   ├── cli.py                     # CLI entry: zt-gateway --mode smol|prod|demo
+│   └── smol_app.py                # All 6 services in one process
 ├── .github/workflows/ci.yml       # 24-test CI pipeline
 ├── .env.example                    # Documented env vars template
 ├── docker-compose.yml             # Multi-service orchestration
 ├── docker-compose.prod.yml        # Production config (volumes, required secrets)
 ├── Makefile                        # Build/run/demo commands
 ├── test_integration.py             # Full integration test suite
+├── test_smol.py                    # Smol mode integration test
 ├── shared/                         # Shared production utilities
 │   └── production.py              # Prometheus metrics, structured logging, security headers, graceful shutdown
 ├── services/
