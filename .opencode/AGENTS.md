@@ -1,54 +1,36 @@
-# ZT Agentic Gateway — Project Knowledge
+# ZT Agent Proxy — Project Knowledge
 
 ## Location
 - `D:\zt agenticv`
 - GitHub: `https://github.com/Tamerktb/ZT-Agentic-gateway.git`
 - Branch: `master`
 
-## Dual Mode Architecture
+## Architecture
+- Single-process HTTP forward proxy (`socketserver.ThreadingTCPServer`)
+- FastAPI management app at separate port (stats, audit, health, metrics)
+- Embedded SQLite audit chain (hash-linked, tamper-evident)
+- No Docker, no microservices, no JWT, no Rego
 
-### Smol Mode (personal)
-- Single process: `pip install zt-gateway && zt-gateway`
-- Package: `zt_gateway/` — Entry: `zt_gateway/cli.py`
-- All 6 services collapsed into one FastAPI app in `zt_gateway/smol_app.py`
-- SQLite databases in `.data/` directory
-- Verify: `python test_smol.py` (23 tests)
+## Key Changes Made This Session (Jul 14 2026)
+- Stripped all unnecessary services (identity-provider, credential-vault, policy-engine, demo-agents, attack-simulator, terraform, monitoring, ui, shared/, images/, docker-compose, Makefile)
+- Rewrote core as transparent HTTP proxy in `zt_gateway/smol_app.py`
+- Proxy uses `socketserver.ThreadingTCPServer` with `ReusableTCPServer(allow_reuse_address=True)`
+- HTTP forwarding uses synchronous `httpx.Client()` (NOT async — avoids asyncio-in-thread issues)
+- Audit service embedded in smol_app.py (no separate service)
+- Management API at separate port with /health, /stats, /audit/chain, /audit/verify, /metrics
 
-### Enterprise Mode (production)
-- Docker Compose: `docker-compose.prod.yml`
-- 6 separate microservices in `services/`
-- Terraform deployment in `terraform/`
-- Wazuh SIEM rules in `monitoring/`
-- Verify: `python test_integration.py` (24 tests)
+## Windows Quirks
+- `allow_reuse_address` must be set as CLASS variable, NOT after `__init__`
+- `urllib` bypasses proxy for `127.0.0.1`/`localhost` due to `no_proxy` env var — clear it in tests
+- Windows ProactorEventLoop doesn't support `reuse_port` — avoid asyncio-based proxy servers
+- Use `socketserver.ThreadingTCPServer` for reliable TCP server on Windows
 
-## Common Workflows
+## Test
+- `python test_proxy.py` — in-process test (proxy + mgmt + test server in threads)
+- Ports: 25001 (proxy), 25002 (mgmt), 25003 (test server)
+- 11 tests covering: management API, HTTP forwarding, prompt injection blocking, data exfiltration blocking, rate limiting, audit chain integrity
 
-### After making changes
-```
-cd D:\zt agenticv
-git add -A
-git commit -m "descriptive message"
-git push origin master
-```
-
-### Update README checklist
-- Add new features to Quick Start order (smol first, then enterprise)
-- Update project structure tree
-- Update tests badge if count changed
-- Keep dual-mode pitch at the top
-
-## Key Files
-| File | Purpose |
-|------|---------|
-| `zt_gateway/smol_app.py` | Smol mode — all services in one process |
-| `zt_gateway/cli.py` | CLI `--mode smol|prod|demo` |
-| `pyproject.toml` | Pip packaging |
-| `test_smol.py` | Smol mode 23-test suite |
-| `test_integration.py` | Enterprise 24-test suite |
-| `services/` | Enterprise microservices (Docker) |
-| `shared/production.py` | Shared utils (metrics, logging, headers) |
-| `ui/` | Web dashboard |
-
-## Credential Helper
-- GitHub credentials should be configured via `git config --global credential.helper`
-- Push with: `git push origin master`
+## CLI
+- `zt-gateway` command via `zt_gateway/cli.py`
+- Args: `--proxy-port`, `--mgmt-port`, `--rate-limit`, `--data-dir`, `--log-level`
+- Usage: set `HTTP_PROXY=http://localhost:8000` in agent config
