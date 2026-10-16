@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.git/
+.opencode/
+.data/
+.test_data/
+*.db
+*.log
+.env
+.github/
