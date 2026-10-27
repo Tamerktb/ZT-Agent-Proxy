@@ -26,6 +26,13 @@ Thumbs.db
 echo_server.py
 traffic.py
 traffic2.py
+probe_stream.py
 render_arch.py
 render_demo.py
+render_cloud.py
+render_edr.py
+render_ioc.py
+assets/cloud-architecture.png
+assets/edr-architecture.png
+assets/pipeline.png
 

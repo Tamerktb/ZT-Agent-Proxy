@@ -49,6 +49,27 @@ time.sleep(3)
 test_body = json.dumps({"ok": True}).encode()
 class H(BaseHTTPRequestHandler):
     def do_GET(self):
+        if self.path == "/stream":
+            # SSE-style: chunks flushed over time, deliberately no Content-Length
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-cache")
+            self.end_headers()
+            for i in range(3):
+                self.wfile.write(b"data: chunk %d\n\n" % i)
+                self.wfile.flush()
+                time.sleep(0.7)
+            return
+        if self.path == "/gzip":
+            import gzip as _gzip
+            comp = _gzip.compress(b"hello from a gzipped upstream")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain")
+            self.send_header("Content-Encoding", "gzip")
+            self.send_header("Content-Length", str(len(comp)))
+            self.end_headers()
+            self.wfile.write(comp)
+            return
         self.send_response(200)
         self.send_header("Content-Length", str(len(test_body)))
         self.end_headers()
@@ -382,6 +403,54 @@ try:
     test("Genesis tampering is detected", r.get("valid") is False, f"valid={r.get('valid')}")
 except Exception as e:
     test("Genesis tampering is detected", False, str(e)[:70])
+
+# ─── 14. Streaming passthrough (v1.3) ───
+print("\n--- 14. Streaming Passthrough ---")
+
+def timed_stream():
+    """Time-to-first-byte vs total transfer time through the proxy."""
+    s = socket.create_connection(("127.0.0.1", PROXY_PORT), timeout=20)
+    s.sendall((f"GET http://127.0.0.1:{TEST_PORT}/stream HTTP/1.1\r\n"
+               f"Host: 127.0.0.1:{TEST_PORT}\r\nConnection: close\r\n\r\n").encode())
+    t0 = time.time()
+    ttfb, buf = None, b""
+    s.settimeout(20)
+    while True:
+        try:
+            b = s.recv(4096)
+        except Exception:
+            break
+        if not b:
+            break
+        if ttfb is None:
+            ttfb = time.time() - t0
+        buf += b
+    s.close()
+    return ttfb, time.time() - t0, buf
+
+try:
+    ttfb, elapsed, buf = timed_stream()
+    head, _, body = buf.partition(b"\r\n\r\n")
+    chunks = body.count(b"data: chunk")
+    test("Stream delivers every chunk", chunks == 3, f"{chunks} chunks")
+    test("Stream body has no Content-Length", b"content-length" not in head.lower())
+    test("Stream reaches the client before it completes",
+         ttfb is not None and ttfb < elapsed - 0.9,
+         f"ttfb={ttfb:.2f}s total={elapsed:.2f}s")
+except Exception as e:
+    test("Streaming passthrough", False, str(e)[:70])
+
+# A compressed upstream is decoded once — not forwarded decoded while still
+# labelled Content-Encoding: gzip (which would corrupt the body).
+try:
+    r = opener.open(f"http://127.0.0.1:{TEST_PORT}/gzip", timeout=10)
+    gz_body = r.read()
+    test("Gzipped upstream decoded and readable", b"gzipped upstream" in gz_body,
+         gz_body[:40])
+    test("Content-Encoding stripped after decode",
+         "content-encoding" not in {k.lower() for k in r.headers.keys()})
+except Exception as e:
+    test("Gzipped upstream", False, str(e)[:70])
 
 # Summary
 total = results['pass'] + results['fail']

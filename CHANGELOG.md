@@ -4,6 +4,40 @@ All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] — 2026-10-27
+
+Streaming. The proxy no longer buffers responses it should be passing through.
+
+### Added
+- **Streaming passthrough.** Responses that are large or of unknown length are
+  written to the client as they arrive instead of being materialised in memory.
+  This is what makes the proxy usable in front of an LLM API: an SSE token
+  stream now reaches the agent token-by-token rather than arriving in one lump
+  at the end. Small textual responses are still buffered, so every rule sees the
+  whole document.
+- `ZT_STREAM_READ_TIMEOUT` (default 300s) for long-lived streams.
+
+### Fixed
+- **`iter_bytes(chunk_size=...)` silently defeated streaming.** httpx's
+  `ByteChunker` accumulates until the requested chunk size is reached, so a
+  45-byte SSE frame sat in the buffer until the stream ended. Streaming now uses
+  `iter_bytes()` with no chunk size, which yields each network chunk as it
+  arrives. Measured: time-to-first-byte 0.02s against a 2.12s stream.
+- **Compressed responses were forwarded corrupt.** The body was decoded on read
+  while the upstream `Content-Encoding: gzip` header was still forwarded, so a
+  client would try to gunzip already-decompressed bytes. The encoding header is
+  now stripped, and the stale `Content-Length` is recomputed.
+- **Duplicate `Content-Length`.** An upstream `content-length` and the one the
+  handler added survived as two separate headers, and clients trusted the stale
+  value (surfacing as `IncompleteRead`). Header replacement is now
+  case-insensitive.
+
+### Tests
+- 40 → **45 assertions**, all passing. New coverage: streaming delivers every
+  chunk, streaming sets no `Content-Length`, the first byte reaches the client
+  well before the stream completes, and a gzipped upstream is decoded exactly
+  once with the encoding header stripped.
+
 ## [1.2.0] — 2026-10-27
 
 Hardening release — two inspection/integrity gaps closed.

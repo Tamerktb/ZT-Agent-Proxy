@@ -56,6 +56,35 @@ def read_chunked_body(rfile, limit: int = MAX_REQUEST_BODY) -> bytes:
         rfile.readline(65536)       # CRLF after each chunk
     return bytes(body)
 
+
+STREAM_READ_TIMEOUT = float(os.environ.get("ZT_STREAM_READ_TIMEOUT", "300"))
+STREAM_CHUNK = 65536
+TEXTUAL_TYPES = ("text", "json", "xml", "javascript", "html", "event-stream")
+
+
+class StreamingBody:
+    """A pass-through response the handler writes incrementally.
+
+    Returned instead of a buffered Response when the upstream body is large or
+    of unknown length — typically an SSE token stream or a file download. The
+    proxy never materialises the body, so tokens reach the agent as the model
+    produces them instead of arriving in one lump at the end.
+    """
+
+    def __init__(self, status_code, headers, iterator, first=b"", closer=None):
+        self.status_code = status_code
+        self.headers = headers
+        self.iterator = iterator
+        self.first = first
+        self._closer = closer
+
+    def close(self):
+        if self._closer:
+            try:
+                self._closer()
+            except Exception:
+                pass
+
 # Prometheus
 PROXY_REQS = Counter("zt_proxy_requests_total", "Proxy requests", ["decision"])
 PROXY_FINDINGS = Counter("zt_proxy_findings_total", "Detection findings", ["category", "rule_id"])
@@ -169,24 +198,37 @@ def handle_http_proxy(method: str, url: str, headers: dict, body: bytes) -> Resp
 
     # 4. Forward
     fwd_headers = {k: v for k, v in headers.items() if k.lower() not in HOP_BY_HOP}
+    client = None
     try:
-        with httpx.Client(timeout=60.0, follow_redirects=False) as client:
-            resp = client.request(method, url, headers=fwd_headers, content=body)
+        client = httpx.Client(
+            timeout=httpx.Timeout(connect=30.0, read=STREAM_READ_TIMEOUT,
+                                  write=STREAM_READ_TIMEOUT, pool=STREAM_READ_TIMEOUT),
+            follow_redirects=False)
+        req = client.build_request(method, url, headers=fwd_headers, content=body)
+        resp = client.send(req, stream=True)
         dur = int((time.time() - start) * 1000)
         PROXY_LATENCY.observe(dur)
 
-        # 5. Response inspection (secret/PII leakage back to the agent)
         ctype = resp.headers.get("content-type", "")
-        resp_decision = {"action": None, "rules": []}
-        if not ctype or any(t in ctype for t in ("text", "json", "xml", "javascript", "html")):
-            resp_text = resp.text[:MAX_BODY_SCAN]
-            resp_decision = _decide(inspect_text(resp_text))
+        textual = (not ctype) or any(t in ctype for t in TEXTUAL_TYPES)
+        clen_hdr = resp.headers.get("content-length", "")
+        clen = int(clen_hdr) if clen_hdr.isdigit() else None
+
+        # 5. Response inspection (secret/PII leakage back to the agent).
+        #    Small textual bodies are buffered so every rule sees the whole
+        #    document. Anything large or of unknown length is streamed: the
+        #    leading chunk is inspected and the rest passes straight through,
+        #    so SSE token streams are not stalled behind a full buffer.
+        if textual and clen is not None and clen <= MAX_BODY_SCAN:
+            content = resp.read()
+            resp.close(); client.close(); client = None
+            resp_decision = _decide(inspect_text(content.decode("utf-8", errors="replace")[:MAX_BODY_SCAN]))
             if resp_decision["action"] == "block":
                 for r in resp_decision["rules"]:
                     PROXY_FINDINGS.labels(category=r["category"], rule_id=r["rule_id"]).inc()
                 aud.log(method, url, 400, "BLOCKED",
                         reason=f"response: {resp_decision['rules'][0]['name']}",
-                        bytes_sent=len(body), bytes_received=len(resp.content),
+                        bytes_sent=len(body), bytes_received=len(content),
                         duration_ms=dur, rules=resp_decision["rules"], trace_id=trace_id)
                 _bump("blocked"); _bump("total")
                 PROXY_REQS.labels(decision="blocked").inc()
@@ -198,30 +240,105 @@ def handle_http_proxy(method: str, url: str, headers: dict, body: bytes) -> Resp
                 warned = True
                 decision["rules"] = decision["rules"] + resp_decision["rules"]
 
+            all_rules = decision["rules"] + (resp_decision["rules"] if resp_decision["action"] else [])
+            if warned:
+                _bump("warned"); _bump("total")
+                PROXY_REQS.labels(decision="warned").inc()
+                aud.log(method, url, resp.status_code, "WARNED",
+                        reason="; ".join(f"{r['rule_id']}:{r['name']}" for r in all_rules),
+                        bytes_sent=len(body), bytes_received=len(content),
+                        duration_ms=dur, rules=all_rules, trace_id=trace_id)
+                logger.warning(f"[{trace_id}] WARN {method} {url} -> {resp.status_code}: "
+                               f"{[r['rule_id'] for r in all_rules]}")
+            else:
+                _bump("proxied"); _bump("total")
+                PROXY_REQS.labels(decision="proxied").inc()
+                aud.log(method, url, resp.status_code, "PROXIED",
+                        bytes_sent=len(body), bytes_received=len(content),
+                        duration_ms=dur, rules=all_rules, trace_id=trace_id)
+                logger.info(f"[{trace_id}] {method} {url} -> {resp.status_code} ({dur}ms)")
+
+            resp_headers = {k: v for k, v in resp.headers.items() if k.lower() not in HOP_BY_HOP}
+            resp_headers["X-ZT-Trace-Id"] = trace_id
+            if warned:
+                resp_headers["X-ZT-Warnings"] = ",".join(r["rule_id"] for r in all_rules)
+            # The body was decoded on read, so the upstream Content-Encoding and
+            # Content-Length are both stale — let the response recompute them.
+            for k in [k for k in resp_headers if k.lower() in ("content-encoding", "content-length")]:
+                del resp_headers[k]
+            return Response(content=content, status_code=resp.status_code, headers=resp_headers)
+
+        # ── streaming path ──
+        # NOTE: iter_bytes() with *no* chunk_size. Passing a chunk_size makes
+        # httpx's ByteChunker buffer until that many bytes have accumulated,
+        # which silently defeats streaming (a 45-byte SSE frame would sit in
+        # the buffer until the stream ended). chunk_size=None yields each
+        # network chunk as it arrives.
+        chunks = resp.iter_bytes()
+        try:
+            first_chunk = next(chunks) or b""
+        except StopIteration:
+            first_chunk = b""
+        resp_decision = {"action": None, "rules": []}
+        if textual and first_chunk:
+            resp_decision = _decide(inspect_text(first_chunk.decode("utf-8", errors="replace")))
+        if resp_decision["action"] == "block":
+            resp.close(); client.close(); client = None
+            for r in resp_decision["rules"]:
+                PROXY_FINDINGS.labels(category=r["category"], rule_id=r["rule_id"]).inc()
+            aud.log(method, url, 400, "BLOCKED",
+                    reason=f"response: {resp_decision['rules'][0]['name']} (stream head)",
+                    bytes_sent=len(body), bytes_received=len(first_chunk),
+                    duration_ms=dur, rules=resp_decision["rules"], trace_id=trace_id)
+            _bump("blocked"); _bump("total")
+            PROXY_REQS.labels(decision="blocked").inc()
+            return Response(status_code=400,
+                            content=json.dumps({"error": "response blocked by security policy",
+                                                "trace_id": trace_id, "rules": resp_decision["rules"]}),
+                            media_type="application/json")
+
         all_rules = decision["rules"] + (resp_decision["rules"] if resp_decision["action"] else [])
-        if warned:
+        stream_warned = warned or resp_decision["action"] == "warn"
+        streamed_so_far = clen if clen is not None else len(first_chunk)
+        if stream_warned:
             _bump("warned"); _bump("total")
             PROXY_REQS.labels(decision="warned").inc()
             aud.log(method, url, resp.status_code, "WARNED",
                     reason="; ".join(f"{r['rule_id']}:{r['name']}" for r in all_rules),
-                    bytes_sent=len(body), bytes_received=len(resp.content),
+                    bytes_sent=len(body), bytes_received=streamed_so_far,
                     duration_ms=dur, rules=all_rules, trace_id=trace_id)
-            logger.warning(f"[{trace_id}] WARN {method} {url} -> {resp.status_code}: "
+            logger.warning(f"[{trace_id}] WARN {method} {url} -> {resp.status_code} (stream): "
                            f"{[r['rule_id'] for r in all_rules]}")
         else:
             _bump("proxied"); _bump("total")
             PROXY_REQS.labels(decision="proxied").inc()
             aud.log(method, url, resp.status_code, "PROXIED",
-                    bytes_sent=len(body), bytes_received=len(resp.content),
+                    bytes_sent=len(body), bytes_received=streamed_so_far,
                     duration_ms=dur, rules=all_rules, trace_id=trace_id)
-            logger.info(f"[{trace_id}] {method} {url} -> {resp.status_code} ({dur}ms)")
+            logger.info(f"[{trace_id}] {method} {url} -> {resp.status_code} ({dur}ms, streaming)")
 
         resp_headers = {k: v for k, v in resp.headers.items() if k.lower() not in HOP_BY_HOP}
         resp_headers["X-ZT-Trace-Id"] = trace_id
-        if warned:
+        if all_rules:
             resp_headers["X-ZT-Warnings"] = ",".join(r["rule_id"] for r in all_rules)
-        return Response(content=resp.content, status_code=resp.status_code, headers=resp_headers)
+        # The body is decoded on the way out. If the upstream was compressed,
+        # both headers are now wrong: the encoding is gone and the decoded
+        # length no longer matches (so the body becomes EOF-delimited).
+        encoded = any(k.lower() == "content-encoding" for k in resp_headers)
+        drop = {"content-encoding", "content-length"} if encoded else set()
+        if clen is None:
+            drop.add("content-length")
+        for k in [k for k in resp_headers if k.lower() in drop]:
+            del resp_headers[k]
+
+        return StreamingBody(resp.status_code, resp_headers, chunks, first_chunk,
+                             closer=lambda: (resp.close(), client.close()))
     except Exception as e:
+        if client is not None:
+            try:
+                client.close()
+            except Exception:
+                pass
         _bump("errors"); _bump("total")
         PROXY_REQS.labels(decision="error").inc()
         aud.log(method, url, 502, "ERROR", reason=str(e), trace_id=trace_id)
@@ -345,8 +462,33 @@ class ProxyTCPHandler(socketserver.StreamRequestHandler):
             reason = {200: "OK", 400: "Bad Request", 403: "Forbidden",
                       429: "Too Many Requests", 502: "Bad Gateway"}.get(resp.status_code, "OK")
             self.wfile.write(f"HTTP/1.1 {resp.status_code} {reason}\r\n".encode())
+
+            if isinstance(resp, StreamingBody):
+                # Pass the body through as it arrives — never buffered.
+                hdrs = {k: v for k, v in resp.headers.items() if k.lower() not in HOP_BY_HOP}
+                hdrs["Connection"] = "close"
+                self.wfile.write("".join(f"{k}: {v}\r\n" for k, v in hdrs.items()).encode())
+                self.wfile.write(b"\r\n")
+                if resp.first:
+                    self.wfile.write(resp.first)
+                    self.wfile.flush()
+                try:
+                    for chunk in resp.iterator:
+                        self.wfile.write(chunk)
+                        self.wfile.flush()
+                except OSError:
+                    pass          # client hung up mid-stream — nothing to salvage
+                finally:
+                    resp.close()
+                return
+
             hdrs = {k: v for k, v in dict(resp.headers).items()
                     if k.lower() not in HOP_BY_HOP}
+            # Replace case-insensitively: an upstream "content-length" and our
+            # "Content-Length" would otherwise BOTH survive as separate headers
+            # and the client would trust the stale one.
+            for k in [k for k in hdrs if k.lower() in ("content-length", "connection")]:
+                del hdrs[k]
             hdrs["Content-Length"] = str(len(resp.body))
             hdrs["Connection"] = "close"
             self.wfile.write("".join(f"{k}: {v}\r\n" for k, v in hdrs.items()).encode())

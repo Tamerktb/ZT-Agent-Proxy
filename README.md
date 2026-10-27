@@ -19,6 +19,11 @@ including *which rules fired* — the genesis entry is verified, chunked request
 bodies are decoded and inspected instead of silently bypassing detection, and
 `/stats` no longer re-hashes the entire chain on every poll.
 
+**v1.3 makes it stream.** Responses that are large or of unknown length are
+passed through as they arrive — an SSE token stream from an LLM API reaches your
+agent token-by-token instead of arriving in one lump at the end. Small textual
+responses are still buffered so every rule sees the whole document.
+
 ![ZT Agent Proxy architecture](assets/zt-proxy-architecture.png)
 
 ## See it in action
@@ -107,6 +112,11 @@ Agent → HTTP_PROXY → ZT Agent Proxy (port 8000) → Target API
 CONNECT tunnels (HTTPS) are inspected at the domain level only (SNI/host);
 payload inspection applies to plain HTTP.
 
+Response inspection is scoped by size: small textual bodies (≤512 KiB) are
+buffered and scanned in full, while large or unknown-length bodies are streamed
+and only the leading chunk is scanned. That is the deliberate trade-off that
+keeps SSE token streams unblocked — see `ZT_STREAM_READ_TIMEOUT`.
+
 ## Management API (port 8080)
 
 Bearer auth is enforced on everything except `/`, `/health`, and `/dashboard`
@@ -131,15 +141,16 @@ when `ZT_MGMT_TOKEN` is set.
 
 ```bash
 python test_proxy.py
-# → 40/40 passed
+# → 45/45 passed
 ```
 
 Covers: HTTP forwarding, CONNECT tunnels (bidirectional), prompt-injection
-blocking, PII/secret blocking (incl. Luhn negatives), warn mode headers,
+blocking, PII/secret blocking (incl. Luhn negatives), warn-mode headers,
 domain blocklist, mgmt bearer auth, /check, rate limiting, forensic JSONL,
 audit chain integrity, chunked-body inspection (blocked + clean), tamper
-detection on `status_code` and on the `rules` column, genesis tampering, and
-stats consistency.
+detection on `status_code` and on the `rules` column, genesis tampering,
+streaming passthrough (every chunk delivered, no `Content-Length`, first byte
+well ahead of completion), gzip decode correctness, and stats consistency.
 
 CI runs the same suite on Python 3.11–3.13 (`.github/workflows/ci.yml`).
 
@@ -148,7 +159,7 @@ CI runs the same suite on Python 3.11–3.13 (`.github/workflows/ci.yml`).
 ```
 ├── pyproject.toml
 ├── Dockerfile
-├── test_proxy.py            # 33-assertion suite
+├── test_proxy.py            # 45-assertion suite
 ├── .github/workflows/ci.yml
 └── zt_gateway/
     ├── __init__.py
