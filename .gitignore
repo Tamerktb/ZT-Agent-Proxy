@@ -18,3 +18,14 @@ Thumbs.db
 *.db
 *.db-journal
 *.db-wal
+
+# Local AI-assistant / dev scratch — never publish
+.opencode/
+
+# Local demo + asset-generation scaffolding
+echo_server.py
+traffic.py
+traffic2.py
+render_arch.py
+render_demo.py
+

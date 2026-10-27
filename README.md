@@ -75,7 +75,7 @@ action is independently configurable (block / warn / log).
 | `injection` | INJ-001…016 | ignore-previous-instructions, jailbreaks, system-prompt extraction, tool-override |
 | `pii` | PII-001…004 | credit cards (Luhn-checked), SSN, email, phone |
 | `secret` | SEC-001…006 | AWS keys, GitHub tokens, OpenAI/Anthropic keys, private-key blocks, bearer tokens |
-| `vuln` | VUL-001…003 | SQL injection, command injection, path traversal |
+| `vuln` | VUL-001…003 | SQL injection, XSS, command injection |
 
 `warn` mode forwards the request but adds `X-ZT-Warnings` and `X-ZT-Trace-Id`
 response headers so the agent (or a human) can react. `log` records the finding
