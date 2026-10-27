@@ -14,6 +14,16 @@ detection-only endpoint, mgmt bearer auth, forensic JSONL logging, and an HTML
 dashboard. All inherited from a feature audit of FireClaw, ClawShield,
 AIProxyGuard, and Trylon.
 
+![ZT Agent Proxy architecture](assets/zt-proxy-architecture.png)
+
+## See it in action
+
+Real output from a live proxy — injection, secret, PII and injection payloads
+blocked; clean requests proxied; every call returning a trace ID and landing in
+the hash-chained audit log.
+
+![Live detection demo](assets/zt-proxy-live-demo.png)
+
 ## Quick Start
 
 ```bash
