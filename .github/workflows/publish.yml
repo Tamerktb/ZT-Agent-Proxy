@@ -1,0 +1,39 @@
+name: Publish to PyPI
+
+# Publishes to PyPI via Trusted Publishing (OIDC) — no API tokens stored.
+# Fires when a GitHub Release is published, or manually from the Actions tab.
+#
+# One-time setup on PyPI (https://pypi.org/manage/account/publishing/):
+#   PyPI Project Name : zt-gateway
+#   Owner             : Tamerktb
+#   Repository name   : ZT-Agent-Proxy
+#   Workflow name     : publish.yml
+#   Environment name  : pypi
+#
+# Then cut a Release (tag v1.1.0) and this workflow publishes automatically.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write # required for Trusted Publishing
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build sdist and wheel
+        run: |
+          python -m pip install --upgrade build
+          python -m build
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1

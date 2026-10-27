@@ -5,11 +5,15 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "zt-gateway"
 version = "1.1.0"
-description = "Transparent HTTP forward proxy for AI agents — inspect, rate-limit, and audit all API calls"
+description = "Transparent HTTP forward proxy for AI agents — inspect, rate-limit, and audit every API call"
 readme = "README.md"
-license = {text = "MIT"}
-authors = [{name = "Tamer Al-Khatib"}]
 requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Tamer Al-Khatib", email = "tamerktb2003@gmail.com" }]
+keywords = [
+    "ai", "llm", "agents", "agentic-ai", "security", "proxy",
+    "prompt-injection", "guardrails", "zero-trust", "audit", "pii", "llm-security",
+]
 dependencies = [
     "fastapi>=0.104.0",
     "uvicorn[standard]>=0.24.0",
@@ -19,14 +23,22 @@ dependencies = [
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
+    "Intended Audience :: System Administrators",
     "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
     "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Internet :: Proxy Servers",
     "Topic :: Security",
 ]
 
 [project.urls]
 Homepage = "https://github.com/Tamerktb/ZT-Agent-Proxy"
 Repository = "https://github.com/Tamerktb/ZT-Agent-Proxy"
+Issues = "https://github.com/Tamerktb/ZT-Agent-Proxy/issues"
+Changelog = "https://github.com/Tamerktb/ZT-Agent-Proxy/blob/master/CHANGELOG.md"
 
 [project.scripts]
 zt-gateway = "zt_gateway.cli:main"

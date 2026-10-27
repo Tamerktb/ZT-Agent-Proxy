@@ -1,5 +1,10 @@
 # ZT Agent Proxy
 
+[![PyPI version](https://img.shields.io/pypi/v/zt-gateway.svg)](https://pypi.org/project/zt-gateway/)
+[![Python versions](https://img.shields.io/pypi/pyversions/zt-gateway.svg)](https://pypi.org/project/zt-gateway/)
+[![CI](https://github.com/Tamerktb/ZT-Agent-Proxy/actions/workflows/ci.yml/badge.svg)](https://github.com/Tamerktb/ZT-Agent-Proxy/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 > **Transparent HTTP forward proxy for AI agents.**
 > Set `HTTP_PROXY=http://localhost:8000` and every API call your agent makes is inspected,
 > rate-limited, and immutably audited — zero code changes.
@@ -12,11 +17,13 @@ AIProxyGuard, and Trylon.
 ## Quick Start
 
 ```bash
-pip install git+https://github.com/Tamerktb/ZT-Agent-Proxy.git
+pip install zt-gateway
 zt-gateway
 # → Proxy:   http://127.0.0.1:8000  ← set this as HTTP_PROXY
 # → Mgmt:    http://127.0.0.1:8080  ← stats, audit, /check, dashboard
 ```
+
+> From source instead: `pip install git+https://github.com/Tamerktb/ZT-Agent-Proxy.git`
 
 Then configure your AI agent:
 
