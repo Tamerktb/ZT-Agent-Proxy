@@ -14,6 +14,11 @@ detection-only endpoint, mgmt bearer auth, forensic JSONL logging, and an HTML
 dashboard. All inherited from a feature audit of FireClaw, ClawShield,
 AIProxyGuard, and Trylon.
 
+**v1.2 hardens it:** the audit-chain hash now covers every field it records —
+including *which rules fired* — the genesis entry is verified, chunked request
+bodies are decoded and inspected instead of silently bypassing detection, and
+`/stats` no longer re-hashes the entire chain on every poll.
+
 ![ZT Agent Proxy architecture](assets/zt-proxy-architecture.png)
 
 ## See it in action
@@ -126,13 +131,15 @@ when `ZT_MGMT_TOKEN` is set.
 
 ```bash
 python test_proxy.py
-# → 33/33 passed
+# → 40/40 passed
 ```
 
 Covers: HTTP forwarding, CONNECT tunnels (bidirectional), prompt-injection
 blocking, PII/secret blocking (incl. Luhn negatives), warn mode headers,
 domain blocklist, mgmt bearer auth, /check, rate limiting, forensic JSONL,
-audit chain integrity, and stats consistency.
+audit chain integrity, chunked-body inspection (blocked + clean), tamper
+detection on `status_code` and on the `rules` column, genesis tampering, and
+stats consistency.
 
 CI runs the same suite on Python 3.11–3.13 (`.github/workflows/ci.yml`).
 

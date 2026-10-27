@@ -38,7 +38,7 @@ def run():
                         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
     Path(DATA_DIR).mkdir(parents=True, exist_ok=True)
     token_state = "ENABLED" if os.environ.get("ZT_MGMT_TOKEN") else "disabled"
-    print(f"\n  ZT Agent Proxy v1.1")
+    print(f"\n  ZT Agent Proxy v1.2")
     print(f"  {'=' * 24}")
     print(f"  Proxy:       http://{PROXY_HOST}:{PROXY_PORT}  <- set this as HTTP_PROXY")
     print(f"  Management:  http://{PROXY_HOST}:{MGMT_PORT}  <- stats, audit, /check, dashboard")

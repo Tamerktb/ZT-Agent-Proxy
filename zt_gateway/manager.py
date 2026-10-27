@@ -67,7 +67,7 @@ def _auth_ok(request: Request) -> bool:
 
 
 def create_manager(audit: AuditService, policy: Policy) -> FastAPI:
-    app = FastAPI(title="ZT Agent Proxy", version="1.1.0", lifespan=lifespan)
+    app = FastAPI(title="ZT Agent Proxy", version="1.2.0", lifespan=lifespan)
     app.mount("/metrics", make_asgi_app())
 
     @app.middleware("http")
@@ -80,7 +80,7 @@ def create_manager(audit: AuditService, policy: Policy) -> FastAPI:
 
     @app.get("/")
     async def root():
-        return {"service": "ZT Agent Proxy", "version": "1.1.0",
+        return {"service": "ZT Agent Proxy", "version": "1.2.0",
                 "proxy": f"http://{proxymod.PROXY_HOST}:{proxymod.PROXY_PORT}",
                 "usage": "Set HTTP_PROXY=http://host:8000 in your agent's environment",
                 "auth": "enabled" if os.environ.get("ZT_MGMT_TOKEN") else "disabled",
@@ -133,8 +133,8 @@ def create_manager(audit: AuditService, policy: Policy) -> FastAPI:
         return audit.get_chain(limit, offset)
 
     @app.get("/audit/verify")
-    async def audit_verify():
-        return audit.verify_chain()
+    async def audit_verify(full: int = 1):
+        return audit.verify_chain(full=bool(full))
 
     @app.get("/forensics")
     async def forensics(n: int = 50):

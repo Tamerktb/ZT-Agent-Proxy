@@ -30,7 +30,31 @@ PROXY_HOST = os.environ.get("ZT_PROXY_HOST", "127.0.0.1")
 PROXY_PORT = int(os.environ.get("ZT_PROXY_PORT", "8000"))
 MGMT_PORT = int(os.environ.get("ZT_MGMT_PORT", "8080"))
 RATE_LIMIT_PER_MIN = int(os.environ.get("ZT_RATE_LIMIT", "60"))
-MAX_BODY_SCAN = 512 * 1024  # inspect first 512 KiB of any body/response
+MAX_BODY_SCAN = 512 * 1024          # inspect first 512 KiB of any body/response
+MAX_REQUEST_BODY = 8 * 1024 * 1024  # cap on a buffered request body (8 MiB)
+
+
+def read_chunked_body(rfile, limit: int = MAX_REQUEST_BODY) -> bytes:
+    """Decode a chunked transfer-encoded body so it can actually be inspected.
+
+    v1.2 fix: chunked requests carried no Content-Length, so the body was never
+    read and never scanned — a trivial inspection bypass.
+    """
+    body = bytearray()
+    while len(body) < limit:
+        line = rfile.readline(65536).strip()
+        if not line:
+            break
+        try:
+            size = int(line.split(b";")[0], 16)
+        except ValueError:
+            break
+        if size <= 0:
+            rfile.readline(65536)   # CRLF after the terminating chunk
+            break
+        body += rfile.read(min(size, limit - len(body)))
+        rfile.readline(65536)       # CRLF after each chunk
+    return bytes(body)
 
 # Prometheus
 PROXY_REQS = Counter("zt_proxy_requests_total", "Proxy requests", ["decision"])
@@ -306,8 +330,17 @@ class ProxyTCPHandler(socketserver.StreamRequestHandler):
             if method == "CONNECT":
                 handle_connect_raw(self.request, target)
                 return
-            cl = int(headers.get("Content-Length", "0") or "0")
-            body = self.rfile.read(cl) if cl > 0 else b""
+            te = (headers.get("Transfer-Encoding") or headers.get("transfer-encoding") or "").lower()
+            if "chunked" in te:
+                body = read_chunked_body(self.rfile)   # inspect chunked bodies too
+                headers = {k: v for k, v in headers.items() if k.lower() != "transfer-encoding"}
+            else:
+                try:
+                    cl = int(headers.get("Content-Length", "0") or "0")
+                except ValueError:
+                    cl = 0
+                cl = max(0, min(cl, MAX_REQUEST_BODY))
+                body = self.rfile.read(cl) if cl > 0 else b""
             resp = handle_http_proxy(method, target, headers, body)
             reason = {200: "OK", 400: "Bad Request", 403: "Forbidden",
                       429: "Too Many Requests", 502: "Bad Gateway"}.get(resp.status_code, "OK")
